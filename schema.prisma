@@ -1,0 +1,478 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================
+// Enums
+// ============================
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  SUSPENDED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum HospitalType {
+  GENERAL
+  SPECIALIZED
+  CLINIC
+  MEDICAL_CENTER
+}
+
+enum HospitalStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  SUSPENDED
+}
+
+enum BookingType {
+  APPOINTMENT
+  ROOM
+  LAB_TEST
+  RADIOLOGY
+  MEDICAL_SERVICE
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  REJECTED
+}
+
+enum RoomStatus {
+  AVAILABLE
+  RESERVED
+  OCCUPIED
+  MAINTENANCE
+}
+
+enum NotificationType {
+  ACCOUNT_REGISTERED
+  ACCOUNT_APPROVED
+  ACCOUNT_REJECTED
+  HOSPITAL_REGISTERED
+  HOSPITAL_APPROVED
+  HOSPITAL_REJECTED
+  CHANGES_REQUESTED
+  BOOKING_CREATED
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  BOOKING_RESCHEDULED
+  GENERAL
+}
+
+// ============================
+// Auth & Users
+// ============================
+
+model User {
+  id           String     @id @default(cuid())
+  fullName     String
+  email        String     @unique
+  phone        String?
+  passwordHash String
+  birthDate    DateTime?
+  gender       Gender?
+  address      String?
+  status       UserStatus @default(PENDING)
+  rejectReason String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  roles            UserRole[]
+  accountRequests  AccountRequest[]
+  hospitalUsers    HospitalUser[]
+  bookings         Booking[]
+  appointments     Appointment[]
+  notifications    Notification[]
+  reviews          Review[]
+  auditLogs        AuditLog[]
+  resetTokens      PasswordResetToken[]
+
+  @@index([status])
+  @@index([email])
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  name        String           @unique // SUPER_ADMIN, USER, HOSPITAL_ADMIN, ...
+  description String?
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  key         String           @unique // e.g. MANAGE_USERS, MANAGE_PROFILE ...
+  description String?
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ============================
+// Account Requests
+// ============================
+
+model AccountRequest {
+  id           String        @id @default(cuid())
+  userId       String        @unique
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status       RequestStatus @default(PENDING)
+  rejectReason String?
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([status])
+}
+
+// ============================
+// Hospitals
+// ============================
+
+model Hospital {
+  id              String         @id @default(cuid())
+  name            String
+  tradeName       String?
+  type            HospitalType   @default(GENERAL)
+  licenseNumber   String?
+  licenseDate     DateTime?
+  country         String?
+  city            String?
+  address         String?
+  phone           String?
+  email           String?
+  website         String?
+  description     String?
+  logoUrl         String?
+  images          String[]
+  status          HospitalStatus @default(PENDING)
+  workingHours    String?
+  rating          Float          @default(0)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  requests          HospitalRequest[]
+  permissions       HospitalPermission[]
+  users             HospitalUser[]
+  departments       Department[]
+  doctors           Doctor[]
+  services          Service[]
+  medicalTests      MedicalTest[]
+  rooms             Room[]
+  bookings          Booking[]
+  appointments      Appointment[]
+  reviews           Review[]
+
+  @@index([status, city])
+  @@index([type])
+}
+
+model HospitalRequest {
+  id                String        @id @default(cuid())
+  hospitalId        String
+  hospital          Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  status            RequestStatus @default(PENDING)
+  rejectReason      String?
+  changeRequestNote String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  // بيانات المسؤول
+  contactName       String?
+  contactJobTitle   String?
+  contactPhone      String?
+  contactEmail      String?
+  contactNationalId String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  documents HospitalDocument[]
+
+  @@index([status])
+}
+
+model HospitalDocument {
+  id          String         @id @default(cuid())
+  requestId   String
+  request     HospitalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  kind        String // LICENSE, COMMERCIAL_RECORD, ACCREDITATION, OTHER
+  fileUrl     String
+  fileName    String?
+  uploadedAt  DateTime       @default(now())
+}
+
+model HospitalPermission {
+  id         String   @id @default(cuid())
+  hospitalId String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  permission String // MANAGE_PROFILE, MANAGE_USERS, MANAGE_DOCTORS, ...
+  enabled    Boolean  @default(true)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([hospitalId, permission])
+  @@index([hospitalId])
+}
+
+model HospitalUser {
+  id         String   @id @default(cuid())
+  hospitalId String
+  userId     String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([hospitalId, userId])
+  @@index([userId])
+}
+
+// ============================
+// Medical Structure
+// ============================
+
+model Department {
+  id          String   @id @default(cuid())
+  hospitalId  String
+  hospital    Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  doctors  Doctor[]
+  services Service[]
+
+  @@index([hospitalId])
+}
+
+model Doctor {
+  id           String   @id @default(cuid())
+  hospitalId   String
+  departmentId String?
+  hospital     Hospital    @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  fullName     String
+  specialty    String?
+  bio          String?
+  imageUrl     String?
+  phone        String?
+  email        String?
+  createdAt    DateTime @default(now())
+
+  appointments Appointment[]
+  bookings     Booking[]
+
+  @@index([hospitalId])
+}
+
+model Service {
+  id           String      @id @default(cuid())
+  hospitalId   String
+  departmentId String?
+  hospital     Hospital    @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  name         String
+  description  String?
+  price        Float?
+  durationMin  Int?
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+
+  bookings Booking[]
+
+  @@index([hospitalId])
+}
+
+model MedicalTest {
+  id          String   @id @default(cuid())
+  hospitalId  String
+  hospital    Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  name        String
+  category    String? // LAB, RADIOLOGY
+  description String?
+  price       Float?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  bookings Booking[]
+
+  @@index([hospitalId, category])
+}
+
+model Room {
+  id         String     @id @default(cuid())
+  hospitalId String
+  hospital   Hospital   @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  number     String
+  type       String?
+  floor      Int?
+  capacity   Int        @default(1)
+  pricePerDay Float?
+  status     RoomStatus @default(AVAILABLE)
+  createdAt  DateTime   @default(now())
+
+  bookings Booking[]
+
+  @@unique([hospitalId, number])
+  @@index([hospitalId, status])
+}
+
+// ============================
+// Bookings
+// ============================
+
+model Appointment {
+  id         String        @id @default(cuid())
+  userId     String
+  hospitalId String
+  doctorId   String?
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hospital   Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  doctor     Doctor?       @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  date       DateTime
+  startTime  String
+  endTime    String?
+  status     BookingStatus @default(PENDING)
+  notes      String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([doctorId, date, startTime])
+  @@index([userId])
+}
+
+model Booking {
+  id            String        @id @default(cuid())
+  reference     String        @unique
+  type          BookingType
+  userId        String
+  hospitalId    String
+  serviceId     String?
+  medicalTestId String?
+  doctorId      String?
+  roomId        String?
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hospital      Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  service       Service?      @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  medicalTest   MedicalTest?  @relation(fields: [medicalTestId], references: [id], onDelete: SetNull)
+  doctor        Doctor?       @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  room          Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  date          DateTime
+  startTime     String
+  endTime       String?
+  status        BookingStatus @default(PENDING)
+  notes         String?
+  cancelReason  String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([userId, status])
+  @@index([hospitalId, status])
+  @@index([doctorId, date, startTime])
+  @@index([date])
+}
+
+// ============================
+// Misc
+// ============================
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType @default(GENERAL)
+  title     String
+  body      String?
+  link      String?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  userId     String
+  hospitalId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  rating     Int
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, hospitalId])
+  @@index([hospitalId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String
+  entity     String?
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
